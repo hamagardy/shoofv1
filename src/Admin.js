@@ -16,7 +16,7 @@ import {
   update,
   push,
 } from "firebase/database";
-import { Draggable, Droppable, DragDropContext } from "@hello-pangea/dnd"; // Added DragDropContext
+import { Draggable, Droppable, DragDropContext } from "@hello-pangea/dnd";
 import QRCode from "qrcode";
 import "./styles.css";
 
@@ -39,9 +39,12 @@ function Admin() {
   const [editEmployeeData, setEditEmployeeData] = useState({});
   const [feedbacks, setFeedbacks] = useState([]);
   const [showFeedbacks, setShowFeedbacks] = useState(false);
-  const [showSettings, setShowSettings] = useState(false); // For settings section
-  const [currentPassword, setCurrentPassword] = useState(""); // For change password
-  const [newPassword, setNewPassword] = useState(""); // For change password
+  const [showSettings, setShowSettings] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [filterYear, setFilterYear] = useState("all"); // Filter by year
+  const [filterMonth, setFilterMonth] = useState("all"); // Filter by month
+  const [swipeState, setSwipeState] = useState({}); // Track swipe position for each feedback
 
   useEffect(() => {
     const rolesRef = dbRef(realtimeDb, "roles");
@@ -169,7 +172,7 @@ function Admin() {
       alert("Password updated successfully!");
       setCurrentPassword("");
       setNewPassword("");
-      setShowSettings(false); // Close settings after success
+      setShowSettings(false);
     } catch (error) {
       alert("Error changing password: " + error.message);
     }
@@ -303,6 +306,16 @@ function Admin() {
     setEmployees(employees.filter((emp) => emp.id !== id));
   };
 
+  const handleDeleteFeedback = async (id) => {
+    await remove(dbRef(realtimeDb, `feedback/${id}`));
+    setFeedbacks(feedbacks.filter((fb) => fb.id !== id));
+    setSwipeState((prev) => {
+      const newState = { ...prev };
+      delete newState[id];
+      return newState;
+    });
+  };
+
   const handleDragEnd = (result) => {
     if (!result.destination) return;
 
@@ -359,6 +372,72 @@ function Admin() {
       console.error("Error updating order:", error)
     );
   };
+
+  // Swipe handlers
+  const handleSwipeStart = (id, e) => {
+    const x = e.type === "touchstart" ? e.touches[0].clientX : e.clientX;
+    setSwipeState((prev) => ({ ...prev, [id]: { startX: x, currentX: 0 } }));
+  };
+
+  const handleSwipeMove = (id, e) => {
+    if (!swipeState[id] || !swipeState[id].startX) return;
+    const x = e.type === "touchmove" ? e.touches[0].clientX : e.clientX;
+    const deltaX = x - swipeState[id].startX;
+    if (deltaX < 0) {
+      setSwipeState((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], currentX: Math.max(deltaX, -100) },
+      }));
+    }
+  };
+
+  // Replace this with the updated version
+  const handleSwipeEnd = (id) => {
+    if (swipeState[id] && swipeState[id].currentX <= -50) {
+      const confirmDelete = window.confirm(
+        "Are you sure you want to delete this feedback?"
+      );
+      if (confirmDelete) {
+        handleDeleteFeedback(id);
+      } else {
+        setSwipeState((prev) => ({
+          ...prev,
+          [id]: { ...prev[id], currentX: 0 },
+        }));
+      }
+    } else {
+      setSwipeState((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], currentX: 0 },
+      }));
+    }
+  };
+
+  // Filter feedbacks by year and month
+  const getYears = () => {
+    const years = feedbacks.map((fb) => new Date(fb.timestamp).getFullYear());
+    return ["all", ...new Set(years)].sort();
+  };
+
+  const getMonths = (year) => {
+    if (year === "all") return ["all"];
+    const months = feedbacks
+      .filter((fb) => new Date(fb.timestamp).getFullYear() === parseInt(year))
+      .map((fb) => new Date(fb.timestamp).getMonth() + 1);
+    return ["all", ...new Set(months)].sort();
+  };
+
+  const filteredFeedbacks = feedbacks
+    .filter((fb) => {
+      const date = new Date(fb.timestamp);
+      const year = date.getFullYear();
+      const month = date.getMonth() + 1;
+      return (
+        (filterYear === "all" || year === parseInt(filterYear)) &&
+        (filterMonth === "all" || month === parseInt(filterMonth))
+      );
+    })
+    .sort((a, b) => b.timestamp - a.timestamp);
 
   if (!user) {
     return (
@@ -433,37 +512,98 @@ function Admin() {
           </button>
         </header>
         <main className="main-content">
+          <div className="filter-container">
+            <label>Filter by Year:</label>
+            <select
+              value={filterYear}
+              onChange={(e) => {
+                setFilterYear(e.target.value);
+                setFilterMonth("all"); // Reset month when year changes
+              }}
+              className="admin-select"
+            >
+              {getYears().map((year) => (
+                <option key={year} value={year}>
+                  {year === "all" ? "All Years" : year}
+                </option>
+              ))}
+            </select>
+            <label>Filter by Month:</label>
+            <select
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+              className="admin-select"
+            >
+              {getMonths(filterYear).map((month) => (
+                <option key={month} value={month}>
+                  {month === "all"
+                    ? "All Months"
+                    : new Date(0, month - 1).toLocaleString("default", {
+                        month: "long",
+                      })}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="employee-list">
-            {feedbacks.length === 0 ? (
+            {filteredFeedbacks.length === 0 ? (
               <p>No feedback submissions found.</p>
             ) : (
-              feedbacks
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .map((feedback) => (
-                  <div key={feedback.id} className="employee-card">
-                    <div className="employee-card-content">
-                      <span className="employee-name">{feedback.name}</span>
-                      <span className="employee-position">
-                        {feedback.position}
-                      </span>
-                      <div>
-                        <p>
-                          <strong>Email:</strong> {feedback.email}
-                        </p>
-                        <p>
-                          <strong>Subject:</strong> {feedback.subject}
-                        </p>
-                        <p>
-                          <strong>Message:</strong> {feedback.message}
-                        </p>
-                        <p>
-                          <strong>Date:</strong>{" "}
-                          {new Date(feedback.timestamp).toLocaleString()}
-                        </p>
-                      </div>
+              filteredFeedbacks.map((feedback) => (
+                <div
+                  key={feedback.id}
+                  className="employee-card feedback-card"
+                  onTouchStart={(e) => handleSwipeStart(feedback.id, e)}
+                  onTouchMove={(e) => handleSwipeMove(feedback.id, e)}
+                  onTouchEnd={() => handleSwipeEnd(feedback.id)}
+                  onMouseDown={(e) => handleSwipeStart(feedback.id, e)}
+                  onMouseMove={(e) => handleSwipeMove(feedback.id, e)}
+                  onMouseUp={() => handleSwipeEnd(feedback.id)}
+                  onMouseLeave={() => handleSwipeEnd(feedback.id)}
+                  style={{
+                    transform: `translateX(${
+                      swipeState[feedback.id]?.currentX || 0
+                    }px)`,
+                    transition:
+                      swipeState[feedback.id]?.currentX === 0
+                        ? "transform 0.3s ease"
+                        : "none",
+                  }}
+                >
+                  <div className="employee-card-content">
+                    <span className="employee-name">{feedback.name}</span>
+                    <span className="employee-position">
+                      {feedback.position}
+                    </span>
+                    <div>
+                      <p>
+                        <strong>Email:</strong> {feedback.email}
+                      </p>
+                      <p>
+                        <strong>Subject:</strong> {feedback.subject}
+                      </p>
+                      <p>
+                        <strong>Message:</strong> {feedback.message}
+                      </p>
+                      <p>
+                        <strong>Date:</strong>{" "}
+                        {new Date(feedback.timestamp).toLocaleString()}
+                      </p>
                     </div>
                   </div>
-                ))
+                  <div
+                    className="delete-background"
+                    style={{
+                      width:
+                        swipeState[feedback.id]?.currentX < 0
+                          ? `${Math.abs(swipeState[feedback.id]?.currentX)}px`
+                          : "0",
+                    }}
+                  >
+                    <i className="fas fa-trash delete-icon"></i>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </main>
