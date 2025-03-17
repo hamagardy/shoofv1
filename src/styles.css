@@ -942,5 +942,33 @@
   border-radius: 4px;
 }
 
+.unread-btn {
+  background-color: #4caf50; /* Green for unread */
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  margin-top: 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.read-btn {
+  background-color: #f44336; /* Red for read */
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  margin-top: 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.unread-btn:hover {
+  background-color: #45a049; /* Darker green */
+}
+
+.read-btn:hover {
+  background-color: #da190b; /* Darker red */
+}
+
 /* Ensure Font Awesome is included */
 @import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css");

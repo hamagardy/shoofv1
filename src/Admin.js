@@ -42,9 +42,11 @@ function Admin() {
   const [showSettings, setShowSettings] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [filterYear, setFilterYear] = useState("all"); // Filter by year
-  const [filterMonth, setFilterMonth] = useState("all"); // Filter by month
-  const [swipeState, setSwipeState] = useState({}); // Track swipe position for each feedback
+  const [filterYear, setFilterYear] = useState("all");
+  const [filterMonth, setFilterMonth] = useState("all");
+  const [swipeState, setSwipeState] = useState({});
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [showRoleReport, setShowRoleReport] = useState(false);
 
   useEffect(() => {
     const rolesRef = dbRef(realtimeDb, "roles");
@@ -126,7 +128,12 @@ function Admin() {
   }, []);
 
   const generateQRCodeText = (employee) => {
-    return `${employee.name}\nPosition: ${employee.position}\nOfficial Shoof Registered User`;
+    const qrText = `${employee.name}\nPosition: ${employee.position}\nOfficial Shoof Registered User`;
+    return employee.phone
+      ? `whatsapp://send?phone=${employee.phone}&text=${encodeURIComponent(
+          qrText
+        )}`
+      : qrText;
   };
 
   const handleLogin = async (e) => {
@@ -289,7 +296,7 @@ function Admin() {
         width: 100,
         height: 100,
       });
-      updatedEmployee.qrCode = qrCodeUrl;
+      updatedEmployee.qrCode = qrCodeUrl; // Overwrites old QR code
       await set(
         dbRef(realtimeDb, `employees/${editEmployeeId}`),
         updatedEmployee
@@ -373,7 +380,6 @@ function Admin() {
     );
   };
 
-  // Swipe handlers
   const handleSwipeStart = (id, e) => {
     const x = e.type === "touchstart" ? e.touches[0].clientX : e.clientX;
     setSwipeState((prev) => ({ ...prev, [id]: { startX: x, currentX: 0 } }));
@@ -391,7 +397,6 @@ function Admin() {
     }
   };
 
-  // Replace this with the updated version
   const handleSwipeEnd = (id) => {
     if (swipeState[id] && swipeState[id].currentX <= -50) {
       const confirmDelete = window.confirm(
@@ -413,7 +418,6 @@ function Admin() {
     }
   };
 
-  // Filter feedbacks by year and month
   const getYears = () => {
     const years = feedbacks.map((fb) => new Date(fb.timestamp).getFullYear());
     return ["all", ...new Set(years)].sort();
@@ -438,6 +442,58 @@ function Admin() {
       );
     })
     .sort((a, b) => b.timestamp - a.timestamp);
+
+  const handleRefreshFeedback = () => {
+    const feedbackRef = dbRef(realtimeDb, "feedback");
+    onValue(
+      feedbackRef,
+      (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          const feedbackList = Object.keys(data).map((key) => ({
+            id: key,
+            ...data[key],
+          }));
+          setFeedbacks(feedbackList);
+        } else {
+          setFeedbacks([]);
+        }
+      },
+      { onlyOnce: true }
+    );
+  };
+
+  const handleExportFeedbackToCSV = () => {
+    const headers = "Name,Position,Email,Subject,Message,Date,Read\n";
+    const rows = filteredFeedbacks
+      .map((fb) =>
+        `${fb.name},${fb.position},${fb.email},${fb.subject},${
+          fb.message
+        },${new Date(fb.timestamp).toLocaleString()},${
+          fb.read || "false"
+        }`.replace(/,/g, " ")
+      )
+      .join("\n");
+    const csv = headers + rows;
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "feedback.csv";
+    a.click();
+  };
+
+  const handleToggleRead = async (id, currentStatus) => {
+    await update(dbRef(realtimeDb, `feedback/${id}`), { read: !currentStatus });
+  };
+
+  const getRoleUsage = () => {
+    const usage = roles.map((role) => ({
+      name: role.value,
+      count: employees.filter((emp) => emp.position === role.value).length,
+    }));
+    return usage;
+  };
 
   if (!user) {
     return (
@@ -518,7 +574,7 @@ function Admin() {
               value={filterYear}
               onChange={(e) => {
                 setFilterYear(e.target.value);
-                setFilterMonth("all"); // Reset month when year changes
+                setFilterMonth("all");
               }}
               className="admin-select"
             >
@@ -544,6 +600,54 @@ function Admin() {
                 </option>
               ))}
             </select>
+            <button
+              onClick={() => {
+                setFilterYear("all");
+                setFilterMonth("all");
+              }}
+              style={{
+                backgroundColor: "#007bff",
+                color: "white",
+                border: "none",
+                padding: "4px 8px", // Smaller size
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "12px", // Professional look
+                marginLeft: "5px",
+              }}
+            >
+              Clear Filters
+            </button>
+            <button
+              onClick={handleRefreshFeedback}
+              style={{
+                backgroundColor: "#007bff",
+                color: "white",
+                border: "none",
+                padding: "4px 8px", // Smaller size
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "12px",
+                marginLeft: "5px",
+              }}
+            >
+              Refresh
+            </button>
+            <button
+              onClick={handleExportFeedbackToCSV}
+              style={{
+                backgroundColor: "#007bff",
+                color: "white",
+                border: "none",
+                padding: "4px 8px", // Smaller size
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "12px",
+                marginLeft: "5px",
+              }}
+            >
+              Export to CSV
+            </button>
           </div>
           <div className="employee-list">
             {filteredFeedbacks.length === 0 ? (
@@ -589,6 +693,24 @@ function Admin() {
                         <strong>Date:</strong>{" "}
                         {new Date(feedback.timestamp).toLocaleString()}
                       </p>
+                      <button
+                        onClick={() =>
+                          handleToggleRead(feedback.id, feedback.read || false)
+                        }
+                        style={{
+                          backgroundColor: feedback.read
+                            ? "#4caf50"
+                            : "#f44336",
+                          color: "white",
+                          border: "none",
+                          padding: "5px 10px",
+                          marginTop: "5px",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {feedback.read ? "Mark Unread" : "Mark Read"}
+                      </button>
                     </div>
                   </div>
                   <div
@@ -688,6 +810,29 @@ function Admin() {
           className="logo"
         />
         <h1>Admin Dashboard</h1>
+        {user && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginLeft: "10px",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "16px",
+                color: "#333",
+                marginRight: "5px",
+              }}
+            >
+              <i
+                style={{ marginRight: "5px" }}
+                className="fas fa-user" // Requires FontAwesome
+              ></i>
+              {user.email}
+            </span>
+          </div>
+        )}
         <div>
           <button
             onClick={() => setShowFeedbacks(true)}
@@ -825,8 +970,53 @@ function Admin() {
             ))
           )}
         </div>
+        <div>
+          <button
+            onClick={() => setShowRoleReport(!showRoleReport)}
+            style={{
+              backgroundColor: "#007bff",
+              color: "white",
+              border: "none",
+              padding: "5px 10px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            {showRoleReport ? "Hide Report" : "Show Role Usage"}
+          </button>
+          {showRoleReport && (
+            <div style={{ marginTop: "10px" }}>
+              {getRoleUsage().map((role) => (
+                <div
+                  key={role.name}
+                  style={{
+                    backgroundColor: "#f9f9f9",
+                    padding: "10px",
+                    marginBottom: "10px",
+                    borderRadius: "5px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  <span style={{ fontSize: "16px", fontWeight: "bold" }}>
+                    {role.name}
+                  </span>
+                  <p style={{ margin: "5px 0" }}>
+                    Assigned to {role.count} employees
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <h2>Employee List</h2>
+        <input
+          type="text"
+          placeholder="Search employees..."
+          value={employeeSearch}
+          onChange={(e) => setEmployeeSearch(e.target.value)}
+          className="admin-input"
+        />
         <DragDropContext onDragEnd={handleDragEnd}>
           <Droppable droppableId="employees">
             {(provided) => (
@@ -839,6 +1029,16 @@ function Admin() {
                   <p>No employees found.</p>
                 ) : (
                   employees
+                    .filter((emp) =>
+                      employeeSearch
+                        ? emp.name
+                            .toLowerCase()
+                            .includes(employeeSearch.toLowerCase()) ||
+                          emp.position
+                            .toLowerCase()
+                            .includes(employeeSearch.toLowerCase())
+                        : true
+                    )
                     .sort((a, b) => a.order - b.order)
                     .map((emp, index) => (
                       <Draggable
